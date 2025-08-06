@@ -121,9 +121,10 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             response = await self.hass.async_add_executor_job(get_remote_file, url)
             parsed_content = csv.reader(response.content.decode('utf-8').splitlines(), delimiter=';')
             rows = list(parsed_content)
+            today = date.today()
 
-            for row in rows:
-                if row[1] == '' and row[2] == data['contract_power']:
+            for row in reversed(rows): #On part de la fin
+                if today >= datetime.strptime(row[0], "%d/%m/%Y").date() and row[2] == data['contract_power']:
                     if data['contract_type'] == CONTRACT_TYPE_BASE:
                         self.data['base_fixe_ttc'] = float(row[4].replace(",", "." ))
                         self.data['base_variable_ttc'] = float(row[6].replace(",", "." ))
