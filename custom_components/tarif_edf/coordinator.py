@@ -133,7 +133,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             response = await get_remote_file_async(url)
             reader = csv.reader(response.decode('utf-8').splitlines(), delimiter=';')
 
-            for row in reader:
+            for row in reversed(list(reader)):
                 if row['DATE_DEBUT'] == '':#CSV can contain empty lines
                     continue
                 #Prices are defined into an interval with a begin date and an optional end date
@@ -145,14 +145,14 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                     continue
                 if row['P_SOUSCRITE'] == data['contract_power']:
                     if data['contract_type'] == CONTRACT_TYPE_BASE:
-                        self.data['base_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." ))
+                        self.data['base_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
                         self.data['base_variable_ttc'] = float(row['PART_VARIABLE_TTC'].replace(",", "." ))
                     elif data['contract_type'] == CONTRACT_TYPE_HPHC:
-                        self.data['hphc_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." ))
+                        self.data['hphc_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
                         self.data['hphc_variable_hc_ttc'] = float(row['PART_VARIABLE_HC_TTC'].replace(",", "." ))
                         self.data['hphc_variable_hp_ttc'] = float(row['PART_VARIABLE_HP_TTC'].replace(",", "." ))
                     elif data['contract_type'] == CONTRACT_TYPE_TEMPO:
-                        self.data['tempo_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." ))
+                        self.data['tempo_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
                         self.data['tempo_variable_hc_bleu_ttc'] = float(row['PART_VARIABLE_HCBleu_TTC'].replace(",", "." ))
                         self.data['tempo_variable_hp_bleu_ttc'] = float(row['PART_VARIABLE_HPBleu_TTC'].replace(",", "." ))
                         self.data['tempo_variable_hc_blanc_ttc'] = float(row['PART_VARIABLE_HCBlanc_TTC'].replace(",", "." ))
