@@ -54,7 +54,7 @@ def str_to_time(str):
     return datetime.strptime(str, '%H:%M').time()
 
 def str_to_date(str):
-    return datetime.strptime(str, "%d/%m/%Y")
+    return datetime.strptime(str, "%d/%m/%Y").date()
 
 def time_in_between(now, start, end):
     if start <= end:
@@ -70,7 +70,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
     """Data update coordinator for the Tarif EDF integration."""
 
     config_entry: ConfigEntry
-    tempo_prices = []
+    tempo_cache = {}
 
     def __init__(
         self, hass: HomeAssistant, entry: ConfigEntry
@@ -86,20 +86,28 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
 
     async def get_tempo_day(self, date):
         date_str = date.strftime('%Y-%m-%d')
-        now = datetime.now().time()
-        check_limit = str_to_time(TEMPO_TOMRROW_AVAILABLE_AT)
+        now = datetime.now()
 
-        for price in self.tempo_prices:
-            codeJour = price['codeJour']
-            if "dateJour" in price and price['dateJour'] == date_str and  \
-                (codeJour in [1,2,3] or (codeJour == 0 and now < check_limit)):
-                return price
+        if date_str in self.tempo_cache:
+            cached_data = self.tempo_cache[date_str]
+            expire_at = now - timedelta(minutes=60)
+
+            if cached_data['codeJour'] == 0:
+                available_at = datetime.combine(date, str_to_time(TEMPO_TOMRROW_AVAILABLE_AT))
+                if now < available_at:
+                    expire_at = available_at
+                else:
+                    expire_at = now - timedelta(minutes=60)
+
+            if now.date() < date or cached_data['__cached_at'] > expire_at:
+                return cached_data
 
         url = f"{TEMPO_COLOR_API_URL}/{date_str}"
         response_bytes = await get_remote_file_async(url)
         response_json = json.loads(response_bytes.decode('utf-8'))
+        response_json['__cached_at'] = now
 
-        self.tempo_prices.append(response_json)
+        self.tempo_cache[date_str] = response_json
 
         return response_json
 
@@ -107,16 +115,20 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
         """Get the latest data from Tarif EDF and updates the state."""
         data = self.config_entry.data
         previous_data = None if self.data is None else self.data.copy()
+        now = datetime.now()
+        today = now.date()
 
-        if previous_data is None:
+        if self.data is None:
             self.data = {
                 "contract_power": data['contract_power'],
                 "contract_type": data['contract_type'],
                 "last_refresh_at": None,
                 "tarif_actuel_ttc": None
             }
+        elif self.data['last_refresh_at'] is not None and self.data['last_refresh_at'].date() != today:
+            self.tempo_cache.clear()
 
-        fresh_data_limit = datetime.now() - timedelta(days=self.config_entry.options.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
+        fresh_data_limit = now - timedelta(days=self.config_entry.options.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
 
         tarif_needs_update = self.data['last_refresh_at'] is None or self.data['last_refresh_at'] < fresh_data_limit
 
@@ -131,17 +143,19 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                     url = TARIF_TEMPO_URL
 
             response = await get_remote_file_async(url)
-            reader = csv.reader(response.decode('utf-8').splitlines(), delimiter=';')
+            lines = response.decode('utf-8').splitlines()
+            reader = csv.DictReader(lines, delimiter=';')
 
+            # Reverse list of rows, so we read from the last line
             for row in reversed(list(reader)):
-                if row['DATE_DEBUT'] == '':#CSV can contain empty lines
+                if row['DATE_DEBUT'] == '':  # CSV can contain empty lines
                     continue
                 #Prices are defined into an interval with a begin date and an optional end date
                 beginDate = str_to_date(row['DATE_DEBUT'])
-                if datetime.now() < beginDate:
+                if today < beginDate:
                     continue
                 endDate = str_to_date(row['DATE_FIN']) if row['DATE_FIN']  != '' else None
-                if endDate is not None and endDate < datetime.now():
+                if endDate is not None and endDate < today:
                     continue
                 if row['P_SOUSCRITE'] == data['contract_power']:
                     if data['contract_type'] == CONTRACT_TYPE_BASE:
@@ -160,12 +174,11 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                         self.data['tempo_variable_hc_rouge_ttc'] = float(row['PART_VARIABLE_HCRouge_TTC'].replace(",", "." ))
                         self.data['tempo_variable_hp_rouge_ttc'] = float(row['PART_VARIABLE_HPRouge_TTC'].replace(",", "." ))
 
-                    self.data['last_refresh_at'] = datetime.now()
+                    self.data['last_refresh_at'] = now
 
                     break
 
         if data['contract_type'] == CONTRACT_TYPE_TEMPO:
-            today = date.today()
             yesterday = today - timedelta(days=1)
             tomorrow = today + timedelta(days=1)
 
@@ -173,28 +186,29 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             tempo_today = await self.get_tempo_day(today)
             tempo_tomorrow = await self.get_tempo_day(tomorrow)
 
+            if now.time() < str_to_time(TEMPO_DAY_START_AT):
+                tempo_now, tempo_next = tempo_yesterday, tempo_today
+            else:
+                tempo_now, tempo_next = tempo_today, tempo_tomorrow
+
             yesterday_color = get_tempo_color_from_code(tempo_yesterday['codeJour'])
             today_color = get_tempo_color_from_code(tempo_today['codeJour'])
             tomorrow_color = get_tempo_color_from_code(tempo_tomorrow['codeJour'])
+            
+            now_color = get_tempo_color_from_code(tempo_now['codeJour'])
+            next_color = get_tempo_color_from_code(tempo_next['codeJour'])
 
             self.data['tempo_couleur_hier'] = yesterday_color
             self.data['tempo_couleur_aujourdhui'] = today_color
             self.data['tempo_couleur_demain'] = tomorrow_color
+            self.data['tempo_couleur'] = now_color
+            self.data['tempo_prochaine_couleur'] = next_color
 
-            currentColorCode = tempo_yesterday['codeJour']
-
-            if datetime.now().time() >= str_to_time(TEMPO_DAY_START_AT):
-                self.logger.info("Using today's tempo prices")
-                currentColorCode = tempo_today['codeJour']
-            else:
-                self.logger.info("Using yesterday's tempo prices")
-
-            if currentColorCode in [1, 2, 3]:
-                color = get_tempo_color_from_code(currentColorCode)
-                self.data['tempo_couleur'] = color
-                self.data['tempo_variable_hp_ttc'] = self.data[f"tempo_variable_hp_{color}_ttc"]
-                self.data['tempo_variable_hc_ttc'] = self.data[f"tempo_variable_hc_{color}_ttc"]
-                self.data['last_refresh_at'] = datetime.now()
+            if tempo_now['codeJour'] in [1, 2, 3]:
+                self.data['tempo_variable_hp_ttc'] = self.data[f"tempo_variable_hp_{now_color}_ttc"]
+                self.data['tempo_variable_hc_ttc'] = self.data[f"tempo_variable_hc_{now_color}_ttc"]
+            
+            self.data['last_refresh_at'] = now
 
         default_offpeak_hours = None
         if data['contract_type'] == CONTRACT_TYPE_TEMPO:
@@ -205,8 +219,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             self.data['tarif_actuel_ttc'] = self.data['base_variable_ttc']
         elif data['contract_type'] in [CONTRACT_TYPE_HPHC, CONTRACT_TYPE_TEMPO] and off_peak_hours_ranges is not None:
             contract_type_key = 'hphc' if data['contract_type'] == CONTRACT_TYPE_HPHC else 'tempo'
-            tarif_actuel = self.data[contract_type_key+'_variable_hp_ttc']
-            now = datetime.now().time()
+            tarif_key = contract_type_key+'_variable_hp_ttc'
             for range in off_peak_hours_ranges.split(','):
                 if not re.match(r'([0-1]?[0-9]|2[0-3]):[0-5][0-9]-([0-1]?[0-9]|2[0-3]):[0-5][0-9]', range):
                     continue
@@ -215,11 +228,12 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                 start_at = str_to_time(hours[0])
                 end_at = str_to_time(hours[1])
 
-                if time_in_between(now, start_at, end_at):
-                    tarif_actuel = self.data[contract_type_key+'_variable_hc_ttc']
+                if time_in_between(now.time(), start_at, end_at):
+                    tarif_key = contract_type_key+'_variable_hc_ttc'
                     break
 
-            self.data['tarif_actuel_ttc'] = tarif_actuel
+            if tarif_key in self.data:
+                self.data['tarif_actuel_ttc'] = self.data[tarif_key]
 
         self.logger.info('EDF Tarif')
         self.logger.info(self.data)
