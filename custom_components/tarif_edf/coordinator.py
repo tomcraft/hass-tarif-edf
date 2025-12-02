@@ -7,8 +7,9 @@ import re
 from typing import Any
 import json
 import logging
-import requests
 import csv
+import aiohttp
+import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -32,14 +33,22 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-def get_remote_file(url: str):
-    return requests.get(
-        url,
-        stream=True,
-        headers={
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36"
-        },
-    )
+async def get_remote_file_async(url: str):
+    """Return an URL content async."""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36"
+        )
+    }
+    timeout = 10  # secondes
+
+    async with aiohttp.ClientSession() as session:
+        with async_timeout.timeout(timeout):
+            async with session.get(url, headers=headers, allow_redirects=True) as resp:
+                resp.raise_for_status()
+                # Return brute content
+                return await resp.read()
 
 def str_to_time(str):
     return datetime.strptime(str, '%H:%M').time()
@@ -87,8 +96,8 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                 return price
 
         url = f"{TEMPO_COLOR_API_URL}/{date_str}"
-        response = await self.hass.async_add_executor_job(get_remote_file, url)
-        response_json = response.json()
+        response_bytes = await get_remote_file_async(url)
+        response_json = json.loads(response_bytes.decode('utf-8'))
 
         self.tempo_prices.append(response_json)
 
@@ -121,8 +130,8 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             elif data['contract_type'] == CONTRACT_TYPE_TEMPO:
                     url = TARIF_TEMPO_URL
 
-            response = await self.hass.async_add_executor_job(get_remote_file, url)
-            reader = csv.DictReader(response.content.decode('utf-8').splitlines(), delimiter=';')
+            response = await get_remote_file_async(url)
+            reader = csv.reader(response.decode('utf-8').splitlines(), delimiter=';')
 
             for row in reader:
                 if row['DATE_DEBUT'] == '':#CSV can contain empty lines
@@ -154,7 +163,6 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                     self.data['last_refresh_at'] = datetime.now()
 
                     break
-            response.close
 
         if data['contract_type'] == CONTRACT_TYPE_TEMPO:
             today = date.today()
