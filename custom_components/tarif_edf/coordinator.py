@@ -27,7 +27,7 @@ from .const import (
     TEMPO_COLOR_API_URL,
     TEMPO_COLORS_MAPPING,
     TEMPO_DAY_START_AT,
-    TEMPO_TOMRROW_AVAILABLE_AT,
+    TEMPO_TOMORROW_AVAILABLE_AT,
     TEMPO_OFFPEAK_HOURS
 )
 
@@ -107,7 +107,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
 
             # If the data is still not complete, update a bit more often
             if is_undefined_color:
-                available_at = datetime.combine(date - timedelta(days=1), str_to_time(TEMPO_TOMRROW_AVAILABLE_AT))
+                available_at = datetime.combine(date - timedelta(days=1), str_to_time(TEMPO_TOMORROW_AVAILABLE_AT))
                 if now < available_at:
                     # The data is not expected to be available, update only twice an hour
                     refresh_period = timedelta(minutes=30)
