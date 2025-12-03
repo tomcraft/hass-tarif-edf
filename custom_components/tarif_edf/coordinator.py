@@ -8,12 +8,12 @@ from typing import Any
 import json
 import logging
 import csv
-import aiohttp
 import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import TimestampDataUpdateCoordinator
 
 from .const import (
@@ -33,7 +33,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-async def get_remote_file_async(url: str):
+
+async def get_remote_file_async(hass: HomeAssistant, url: str) -> bytes:
     """Return an URL content async."""
     headers = {
         "User-Agent": (
@@ -41,14 +42,14 @@ async def get_remote_file_async(url: str):
             "(KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36"
         )
     }
-    timeout = 10  # secondes
+    timeout = 10  # seconds
 
-    async with aiohttp.ClientSession() as session:
-        with async_timeout.timeout(timeout):
-            async with session.get(url, headers=headers, allow_redirects=True) as resp:
-                resp.raise_for_status()
-                # Return brute content
-                return await resp.read()
+    session = async_get_clientsession(hass)
+    async with async_timeout.timeout(timeout):
+        async with session.get(url, headers=headers, allow_redirects=True) as resp:
+            resp.raise_for_status()
+            # Return raw content
+            return await resp.read()
 
 def str_to_time(str):
     return datetime.strptime(str, '%H:%M').time()
@@ -121,7 +122,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
 
         # Query data from API
         url = f"{TEMPO_COLOR_API_URL}/{date_str}"
-        response_bytes = await get_remote_file_async(url)
+        response_bytes = await get_remote_file_async(self.hass, url)
         response_json = json.loads(response_bytes.decode('utf-8'))
         response_json['__cached_at'] = now
 
@@ -159,7 +160,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             elif data['contract_type'] == CONTRACT_TYPE_TEMPO:
                     url = TARIF_TEMPO_URL
 
-            response = await get_remote_file_async(url)
+            response = await get_remote_file_async(self.hass, url)
             lines = response.decode('utf-8').splitlines()
             reader = csv.DictReader(lines, delimiter=';')
 
