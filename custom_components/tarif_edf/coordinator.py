@@ -7,12 +7,9 @@ from typing import Any
 import json
 import logging
 import csv
-import asyncio
-import aiohttp
 import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import (
@@ -188,13 +185,16 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             for row in reversed(list(reader)):
                 if row['DATE_DEBUT'] == '':  # CSV can contain empty lines
                     continue
+
                 #Prices are defined into an interval with a begin date and an optional end date
-                beginDate = str_to_date(row['DATE_DEBUT'])
-                if today < beginDate:
+                start_date = str_to_date(row['DATE_DEBUT'])
+                if today < start_date:
                     continue
-                endDate = str_to_date(row['DATE_FIN']) if row['DATE_FIN']  != '' else None
-                if endDate is not None and endDate < today:
+
+                end_date = str_to_date(row['DATE_FIN']) if row['DATE_FIN']  != '' else None
+                if end_date is not None and end_date < today:
                     continue
+
                 if row['P_SOUSCRITE'] == data['contract_power']:
                     if data['contract_type'] == CONTRACT_TYPE_BASE:
                         self.data['base_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
