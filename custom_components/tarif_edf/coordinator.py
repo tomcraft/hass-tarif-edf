@@ -84,29 +84,48 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
         )
         self.config_entry = entry
 
+    def clear_tempo_cache(self, today):
+        expired_date_str = (today - timedelta(days=2)).strftime('%Y-%m-%d')
+        if expired_date_str in self.tempo_cache:
+            del self.tempo_cache[expired_date_str]
+
     async def get_tempo_day(self, date):
         date_str = date.strftime('%Y-%m-%d')
         now = datetime.now()
 
         if date_str in self.tempo_cache:
             cached_data = self.tempo_cache[date_str]
-            expire_at = now - timedelta(minutes=60)
+            day_start_at = datetime.combine(date, str_to_time(TEMPO_DAY_START_AT))
+            is_undefined_color = cached_data['codeJour'] == 0
 
-            if cached_data['codeJour'] == 0:
-                available_at = datetime.combine(date, str_to_time(TEMPO_TOMRROW_AVAILABLE_AT))
-                if now < available_at:
-                    expire_at = available_at
-                else:
-                    expire_at = now - timedelta(minutes=60)
-
-            if now.date() < date or cached_data['__cached_at'] > expire_at:
+            # If the data is complete and was fetched after the day started, keep the value
+            if not is_undefined_color and cached_data['__cached_at'] > day_start_at:
                 return cached_data
 
+            # Otherwise, regularly update it (not too often)
+            refresh_period = timedelta(minutes=60)
+
+            # If the data is still not complete, update a bit more often
+            if is_undefined_color:
+                available_at = datetime.combine(date - timedelta(days=1), str_to_time(TEMPO_TOMRROW_AVAILABLE_AT))
+                if now < available_at:
+                    # The data is not expected to be available, update only twice an hour
+                    refresh_period = timedelta(minutes=30)
+                else:
+                    # The data is expected to be available, update 4 times per hour
+                    refresh_period = timedelta(minutes=15)
+
+            # Use the cached data until expiration
+            if cached_data['__cached_at'] + refresh_period > now:
+                return cached_data
+
+        # Query data from API
         url = f"{TEMPO_COLOR_API_URL}/{date_str}"
         response_bytes = await get_remote_file_async(url)
         response_json = json.loads(response_bytes.decode('utf-8'))
         response_json['__cached_at'] = now
 
+        # Cache the result
         self.tempo_cache[date_str] = response_json
 
         return response_json
@@ -125,14 +144,12 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                 "last_refresh_at": None,
                 "tarif_actuel_ttc": None
             }
-        elif self.data['last_refresh_at'] is not None and self.data['last_refresh_at'].date() != today:
-            self.tempo_cache.clear()
 
         fresh_data_limit = now - timedelta(days=self.config_entry.options.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
 
         tarif_needs_update = self.data['last_refresh_at'] is None or self.data['last_refresh_at'] < fresh_data_limit
 
-        self.logger.info('EDF tarif_needs_update '+('yes' if tarif_needs_update else 'no'))
+        self.logger.debug('EDF tarif_needs_update '+('yes' if tarif_needs_update else 'no'))
 
         if tarif_needs_update:
             if data['contract_type'] == CONTRACT_TYPE_BASE:
@@ -182,9 +199,18 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             yesterday = today - timedelta(days=1)
             tomorrow = today + timedelta(days=1)
 
-            tempo_yesterday = await self.get_tempo_day(yesterday)
-            tempo_today = await self.get_tempo_day(today)
-            tempo_tomorrow = await self.get_tempo_day(tomorrow)
+            if self.data['last_refresh_at'] is not None and self.data['last_refresh_at'].date() != today:
+                self.clear_tempo_cache(today)
+
+            import asyncio
+            tempo_yesterday, tempo_today, tempo_tomorrow = await asyncio.gather(
+                self.get_tempo_day(yesterday),
+                self.get_tempo_day(today),
+                self.get_tempo_day(tomorrow),
+            )
+
+            self.logger.debug('EDF Tempo Cache')
+            self.logger.debug(self.tempo_cache)
 
             if now.time() < str_to_time(TEMPO_DAY_START_AT):
                 tempo_now, tempo_next = tempo_yesterday, tempo_today
@@ -235,7 +261,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             if tarif_key in self.data:
                 self.data['tarif_actuel_ttc'] = self.data[tarif_key]
 
-        self.logger.info('EDF Tarif')
-        self.logger.info(self.data)
+        self.logger.debug('EDF Tarif')
+        self.logger.debug(self.data)
 
         return self.data
