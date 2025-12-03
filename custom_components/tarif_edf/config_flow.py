@@ -37,7 +37,6 @@ STEP_USER = vol.Schema(
     }
 )
 
-@config_entries.HANDLERS.register(DOMAIN)
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Tarif EDF."""
 
