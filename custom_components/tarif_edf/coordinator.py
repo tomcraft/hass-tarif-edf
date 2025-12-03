@@ -75,9 +75,6 @@ def get_tempo_color_from_code(code: int) -> str:
 class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
     """Data update coordinator for the Tarif EDF integration."""
 
-    config_entry: ConfigEntry
-    tempo_cache = {}
-
     def __init__(
         self, hass: HomeAssistant, entry: ConfigEntry
     ) -> None:
@@ -89,11 +86,19 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             update_interval=timedelta(minutes=1),
         )
         self.config_entry = entry
+        self.tempo_cache: dict[str, Any] = {}
 
-    def clear_tempo_cache(self, today: date) -> None:
-        expired_date_str = (today - timedelta(days=2)).strftime('%Y-%m-%d')
-        if expired_date_str in self.tempo_cache:
-            del self.tempo_cache[expired_date_str]
+    def clear_tempo_cache(self, limit_date: date) -> None:
+        """Clear outdated entries from the Tempo cache."""
+        keys_to_delete: list[str] = []
+
+        for key in self.tempo_cache.keys():
+            key_date = datetime.strptime(key, "%Y-%m-%d").date()
+            if key_date < limit_date:
+                keys_to_delete.append(key)
+
+        for key in keys_to_delete:
+            del self.tempo_cache[key]
 
     async def get_tempo_day(self, target_date: date) -> dict[str, Any]:
         date_str = target_date.strftime("%Y-%m-%d")
@@ -205,7 +210,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             tomorrow = today + timedelta(days=1)
 
             if self.data['last_refresh_at'] is not None and self.data['last_refresh_at'].date() != today:
-                self.clear_tempo_cache(today)
+                self.clear_tempo_cache(yesterday)
 
             import asyncio
             tempo_yesterday, tempo_today, tempo_tomorrow = await asyncio.gather(
