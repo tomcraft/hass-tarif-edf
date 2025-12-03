@@ -20,6 +20,7 @@ from .const import (
     CONTRACT_TYPE_BASE,
     CONTRACT_TYPE_HPHC,
     CONTRACT_TYPE_TEMPO,
+    TEMPO_COLORS_MAPPING,
 )
 
 async def async_setup_entry(
@@ -32,42 +33,42 @@ async def async_setup_entry(
     ]["coordinator"]
 
     sensors = [
-        TarifEdfSensor(coordinator, 'contract_power', f"Puissance souscrite {coordinator.data['contract_type']} {coordinator.data['contract_power']}kVA", 'kVA', None, SensorStateClass.MEASUREMENT),
+        TarifEdfSensor(coordinator, 'contract_power', f"Puissance souscrite {coordinator.data['contract_type']} {coordinator.data['contract_power']}kVA", 'kVA'),
     ]
 
     if coordinator.data['contract_type'] == CONTRACT_TYPE_BASE:
         sensors.extend([
-            TarifEdfSensor(coordinator, 'base_variable_ttc', 'Tarif Base TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'base_fixe_ttc', 'Tarif Abonnement Base TTC', 'EUR/mois', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
+            TarifEdfSensor(coordinator, 'base_variable_ttc', 'Tarif Base TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'base_fixe_ttc', 'Tarif Abonnement Base TTC', 'EUR/mois', SensorDeviceClass.MONETARY),
         ])
     elif coordinator.data['contract_type'] == CONTRACT_TYPE_HPHC:
         sensors.extend([
-            TarifEdfSensor(coordinator, 'hphc_variable_hc_ttc', 'Tarif Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'hphc_variable_hp_ttc', 'Tarif Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'hphc_fixe_ttc', 'Tarif Abonnement HPHC TTC', 'EUR/mois', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
+            TarifEdfSensor(coordinator, 'hphc_variable_hc_ttc', 'Tarif Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'hphc_variable_hp_ttc', 'Tarif Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'hphc_fixe_ttc', 'Tarif Abonnement HPHC TTC', 'EUR/mois', SensorDeviceClass.MONETARY),
         ])
     elif coordinator.data['contract_type'] == CONTRACT_TYPE_TEMPO:
-        color_options = ["bleu", "blanc", "rouge", "indéterminé"]
+        color_options = list(TEMPO_COLORS_MAPPING.values())
         sensors.extend([
             TarifEdfSensor(coordinator, 'tempo_couleur', 'Tarif Tempo Couleur', device_class = SensorDeviceClass.ENUM, enum_options=color_options),
             TarifEdfSensor(coordinator, 'tempo_prochaine_couleur', 'Tarif Tempo Prochaine Couleur', device_class = SensorDeviceClass.ENUM, enum_options=color_options),
             TarifEdfSensor(coordinator, 'tempo_couleur_hier', 'Tarif Tempo Couleur Hier', device_class = SensorDeviceClass.ENUM, enum_options=color_options),
             TarifEdfSensor(coordinator, 'tempo_couleur_aujourdhui', "Tarif Tempo Couleur Aujourd'hui", device_class = SensorDeviceClass.ENUM, enum_options=color_options),
             TarifEdfSensor(coordinator, 'tempo_couleur_demain', 'Tarif Tempo Couleur Demain', device_class = SensorDeviceClass.ENUM, enum_options=color_options),
-            TarifEdfSensor(coordinator, 'tempo_variable_hc_ttc', 'Tarif Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'tempo_variable_hp_ttc', 'Tarif Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'tempo_variable_hc_bleu_ttc', 'Tarif Bleu Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'tempo_variable_hp_bleu_ttc', 'Tarif Bleu Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'tempo_variable_hc_rouge_ttc', 'Tarif Rouge Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'tempo_variable_hp_rouge_ttc', 'Tarif Rouge Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'tempo_variable_hc_blanc_ttc', 'Tarif Blanc Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'tempo_variable_hp_blanc_ttc', 'Tarif Blanc Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
-            TarifEdfSensor(coordinator, 'tempo_fixe_ttc', 'Tarif Abonnement Tempo TTC', 'EUR/mois', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL),
+            TarifEdfSensor(coordinator, 'tempo_variable_hc_ttc', 'Tarif Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'tempo_variable_hp_ttc', 'Tarif Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'tempo_variable_hc_bleu_ttc', 'Tarif Bleu Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'tempo_variable_hp_bleu_ttc', 'Tarif Bleu Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'tempo_variable_hc_rouge_ttc', 'Tarif Rouge Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'tempo_variable_hp_rouge_ttc', 'Tarif Rouge Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'tempo_variable_hc_blanc_ttc', 'Tarif Blanc Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'tempo_variable_hp_blanc_ttc', 'Tarif Blanc Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
+            TarifEdfSensor(coordinator, 'tempo_fixe_ttc', 'Tarif Abonnement Tempo TTC', 'EUR/mois', SensorDeviceClass.MONETARY),
         ])
 
     if coordinator.data['tarif_actuel_ttc'] is not None:
         sensors.append(
-            TarifEdfSensor(coordinator, 'tarif_actuel_ttc', f"Tarif actuel {coordinator.data['contract_type']} {coordinator.data['contract_power']}kVA TTC", 'EUR/kWh', SensorDeviceClass.MONETARY, SensorStateClass.TOTAL)
+            TarifEdfSensor(coordinator, 'tarif_actuel_ttc', f"Tarif actuel {coordinator.data['contract_type']} {coordinator.data['contract_power']}kVA TTC", 'EUR/kWh', SensorDeviceClass.MONETARY)
         )
 
     async_add_entities(sensors, False)
