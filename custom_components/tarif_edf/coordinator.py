@@ -1,7 +1,7 @@
 """Data update coordinator for the Tarif EDF integration."""
 from __future__ import annotations
 
-from datetime import timedelta, datetime, date
+from datetime import timedelta, datetime, date, time
 import time
 import re
 from typing import Any
@@ -51,19 +51,24 @@ async def get_remote_file_async(hass: HomeAssistant, url: str) -> bytes:
             # Return raw content
             return await resp.read()
 
-def str_to_time(str):
-    return datetime.strptime(str, '%H:%M').time()
+def str_to_time(value: str) -> time:
+    """Convert a HH:MM string to a time object."""
+    return datetime.strptime(value, "%H:%M").time()
 
-def str_to_date(str):
-    return datetime.strptime(str, "%d/%m/%Y").date()
 
-def time_in_between(now, start, end):
+def str_to_date(value: str) -> date:
+    """Convert a DD/MM/YYYY string to a date object."""
+    return datetime.strptime(value, "%d/%m/%Y").date()
+
+
+def time_in_between(now: time, start: time, end: time) -> bool:
+    """Return True if now is between start and end, handling overnight ranges."""
     if start <= end:
         return start <= now < end
     else:
         return start <= now or now < end
 
-def get_tempo_color_from_code(code):
+def get_tempo_color_from_code(code: int) -> str:
     return TEMPO_COLORS_MAPPING[code]
 
 
@@ -85,18 +90,18 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
         )
         self.config_entry = entry
 
-    def clear_tempo_cache(self, today):
+    def clear_tempo_cache(self, today: date) -> None:
         expired_date_str = (today - timedelta(days=2)).strftime('%Y-%m-%d')
         if expired_date_str in self.tempo_cache:
             del self.tempo_cache[expired_date_str]
 
-    async def get_tempo_day(self, date):
-        date_str = date.strftime('%Y-%m-%d')
+    async def get_tempo_day(self, target_date: date) -> dict[str, Any]:
+        date_str = target_date.strftime("%Y-%m-%d")
         now = datetime.now()
 
         if date_str in self.tempo_cache:
             cached_data = self.tempo_cache[date_str]
-            day_start_at = datetime.combine(date, str_to_time(TEMPO_DAY_START_AT))
+            day_start_at = datetime.combine(target_date, str_to_time(TEMPO_DAY_START_AT))
             is_undefined_color = cached_data['codeJour'] == 0
 
             # If the data is complete and was fetched after the day started, keep the value
@@ -131,10 +136,9 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
 
         return response_json
 
-    async def _async_update_data(self) -> dict[Platform, dict[str, Any]]:
+    async def _async_update_data(self) -> dict[str, Any]:
         """Get the latest data from Tarif EDF and updates the state."""
         data = self.config_entry.data
-        previous_data = None if self.data is None else self.data.copy()
         now = datetime.now()
         today = now.date()
 
