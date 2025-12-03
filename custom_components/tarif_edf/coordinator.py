@@ -2,19 +2,23 @@
 from __future__ import annotations
 
 from datetime import timedelta, datetime, date, time
-import time
 import re
 from typing import Any
 import json
 import logging
 import csv
+import asyncio
+import aiohttp
 import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.update_coordinator import TimestampDataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import (
+    TimestampDataUpdateCoordinator,
+    UpdateFailed,
+)
 
 from .const import (
     DEFAULT_REFRESH_INTERVAL,
@@ -118,7 +122,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
 
             # If the data is still not complete, update a bit more often
             if is_undefined_color:
-                available_at = datetime.combine(date - timedelta(days=1), str_to_time(TEMPO_TOMORROW_AVAILABLE_AT))
+                available_at = datetime.combine(target_date - timedelta(days=1), str_to_time(TEMPO_TOMORROW_AVAILABLE_AT))
                 if now < available_at:
                     # The data is not expected to be available, update only twice an hour
                     refresh_period = timedelta(minutes=30)
@@ -142,7 +146,14 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
         return response_json
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Get the latest data from Tarif EDF and updates the state."""
+        """Wrapper that calls the unsafe update and handles errors for HA."""
+        try:
+            return await self._async_update_data_unsafe()
+        except Exception as err:
+            raise UpdateFailed(f"Error while updating Tarif EDF data: {err}") from err
+
+    async def _async_update_data_unsafe(self) -> dict[str, Any]:
+        """Get the latest data from Tarif EDF and update the state. (may raise)"""
         data = self.config_entry.data
         now = datetime.now()
         today = now.date()
