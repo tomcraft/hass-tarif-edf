@@ -64,6 +64,18 @@ async def async_setup_entry(
             TarifEdfSensor(coordinator, 'tempo_variable_hc_blanc_ttc', 'Tarif Blanc Tempo Heures creuses TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
             TarifEdfSensor(coordinator, 'tempo_variable_hp_blanc_ttc', 'Tarif Blanc Tempo Heures pleines TTC', 'EUR/kWh', SensorDeviceClass.MONETARY),
             TarifEdfSensor(coordinator, 'tempo_fixe_ttc', 'Tarif Abonnement Tempo TTC', 'EUR/mois', SensorDeviceClass.MONETARY),
+
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_bleus_restants', 'Jours Tempo Bleus Restants', 'jours'),
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_bleus_consommes', 'Jours Tempo Bleus Consommés', 'jours'),
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_bleus_total', 'Jours Tempo Bleus Total', 'jours'),
+
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_blancs_restants', 'Jours Tempo Blancs Restants', 'jours'),
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_blancs_consommes', 'Jours Tempo Blancs Consommés', 'jours'),
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_blancs_total', 'Jours Tempo Blancs Total', 'jours'),
+
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_rouges_restants', 'Jours Tempo Rouges Restants', 'jours'),
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_rouges_consommes', 'Jours Tempo Rouges Consommés', 'jours'),
+            TarifEdfSensor(coordinator, 'tempo_stats_jours_rouges_total', 'Jours Tempo Rouges Total', 'jours'),
         ])
 
     if coordinator.data['tarif_actuel_ttc'] is not None:

@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import (
+    CONTRACT_TARIF_URL_MAPPING,
     DEFAULT_REFRESH_INTERVAL,
     CONTRACT_TYPE_BASE,
     CONTRACT_TYPE_HPHC,
@@ -26,6 +27,7 @@ from .const import (
     TARIF_HPHC_URL,
     TARIF_TEMPO_URL,
     TEMPO_COLOR_API_URL,
+    TEMPO_COLOR_STATS_API_URL,
     TEMPO_COLORS_MAPPING,
     TEMPO_DAY_START_AT,
     TEMPO_TOMORROW_AVAILABLE_AT,
@@ -160,66 +162,37 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                 "contract_power": data['contract_power'],
                 "contract_type": data['contract_type'],
                 "last_refresh_at": None,
+                "last_prices_refresh_at": None,
+                "last_tempo_stats_refresh_at": None,
                 "tarif_actuel_ttc": None
             }
 
-        fresh_data_limit = now - timedelta(days=self.config_entry.options.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
+        contract_type = self.data['contract_type']
 
-        tarif_needs_update = self.data['last_refresh_at'] is None or self.data['last_refresh_at'] < fresh_data_limit
+        prices_expire_at = now - timedelta(days=self.config_entry.options.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
+        tempo_stats_expire_at = now - timedelta(hours=4)
 
-        self.logger.debug('EDF tarif_needs_update '+('yes' if tarif_needs_update else 'no'))
+        prices_needs_update = self.data['last_prices_refresh_at'] is None or self.data['last_prices_refresh_at'] < prices_expire_at
+        tempo_stats_needs_update = self.data['last_tempo_stats_refresh_at'] is None or self.data['last_tempo_stats_refresh_at'] < tempo_stats_expire_at
 
-        if tarif_needs_update:
-            if data['contract_type'] == CONTRACT_TYPE_BASE:
-                url = TARIF_BASE_URL
-            elif data['contract_type'] == CONTRACT_TYPE_HPHC:
-                    url = TARIF_HPHC_URL
-            elif data['contract_type'] == CONTRACT_TYPE_TEMPO:
-                    url = TARIF_TEMPO_URL
+        self.logger.debug('EDF prices_needs_update ', ('yes' if prices_needs_update else 'no'))
+        self.logger.debug('EDF tempo_stats_needs_update ', ('yes' if tempo_stats_needs_update else 'no'))
 
-            response = await get_remote_file_async(self.hass, url)
-            lines = response.decode('utf-8').splitlines()
-            reader = csv.DictReader(lines, delimiter=';')
+        # Get prices from gouv website if required
+        if prices_needs_update:
+            await self.update_prices(today)
+            self.data['last_prices_refresh_at'] = now
 
-            # Reverse list of rows, so we read from the last line
-            for row in reversed(list(reader)):
-                if row['DATE_DEBUT'] == '':  # CSV can contain empty lines
-                    continue
-
-                #Prices are defined into an interval with a begin date and an optional end date
-                start_date = str_to_date(row['DATE_DEBUT'])
-                if today < start_date:
-                    continue
-
-                end_date = str_to_date(row['DATE_FIN']) if row['DATE_FIN']  != '' else None
-                if end_date is not None and end_date < today:
-                    continue
-
-                if row['P_SOUSCRITE'] == data['contract_power']:
-                    if data['contract_type'] == CONTRACT_TYPE_BASE:
-                        self.data['base_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
-                        self.data['base_variable_ttc'] = float(row['PART_VARIABLE_TTC'].replace(",", "." ))
-                    elif data['contract_type'] == CONTRACT_TYPE_HPHC:
-                        self.data['hphc_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
-                        self.data['hphc_variable_hc_ttc'] = float(row['PART_VARIABLE_HC_TTC'].replace(",", "." ))
-                        self.data['hphc_variable_hp_ttc'] = float(row['PART_VARIABLE_HP_TTC'].replace(",", "." ))
-                    elif data['contract_type'] == CONTRACT_TYPE_TEMPO:
-                        self.data['tempo_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
-                        self.data['tempo_variable_hc_bleu_ttc'] = float(row['PART_VARIABLE_HCBleu_TTC'].replace(",", "." ))
-                        self.data['tempo_variable_hp_bleu_ttc'] = float(row['PART_VARIABLE_HPBleu_TTC'].replace(",", "." ))
-                        self.data['tempo_variable_hc_blanc_ttc'] = float(row['PART_VARIABLE_HCBlanc_TTC'].replace(",", "." ))
-                        self.data['tempo_variable_hp_blanc_ttc'] = float(row['PART_VARIABLE_HPBlanc_TTC'].replace(",", "." ))
-                        self.data['tempo_variable_hc_rouge_ttc'] = float(row['PART_VARIABLE_HCRouge_TTC'].replace(",", "." ))
-                        self.data['tempo_variable_hp_rouge_ttc'] = float(row['PART_VARIABLE_HPRouge_TTC'].replace(",", "." ))
-
-                    self.data['last_refresh_at'] = now
-
-                    break
-
-        if data['contract_type'] == CONTRACT_TYPE_TEMPO:
+        if contract_type == CONTRACT_TYPE_TEMPO:
             yesterday = today - timedelta(days=1)
             tomorrow = today + timedelta(days=1)
 
+            # Get tempo days stats if required
+            if tempo_stats_needs_update:
+                await self.update_tempo_stats()
+                self.data['last_tempo_stats_refresh_at'] = now
+
+            # Clear tempo day cache on day transition
             if self.data['last_refresh_at'] is not None and self.data['last_refresh_at'].date() != today:
                 self.clear_tempo_cache(yesterday)
 
@@ -254,18 +227,17 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             if tempo_now['codeJour'] in [1, 2, 3]:
                 self.data['tempo_variable_hp_ttc'] = self.data[f"tempo_variable_hp_{now_color}_ttc"]
                 self.data['tempo_variable_hc_ttc'] = self.data[f"tempo_variable_hc_{now_color}_ttc"]
-            
-            self.data['last_refresh_at'] = now
 
+        # Compute current prices based on subscription type and off-peak hours
         default_offpeak_hours = None
-        if data['contract_type'] == CONTRACT_TYPE_TEMPO:
+        if contract_type == CONTRACT_TYPE_TEMPO:
             default_offpeak_hours = TEMPO_OFFPEAK_HOURS
         off_peak_hours_ranges = self.config_entry.options.get("off_peak_hours_ranges", default_offpeak_hours)
 
-        if data['contract_type'] == CONTRACT_TYPE_BASE:
+        if contract_type == CONTRACT_TYPE_BASE:
             self.data['tarif_actuel_ttc'] = self.data['base_variable_ttc']
-        elif data['contract_type'] in [CONTRACT_TYPE_HPHC, CONTRACT_TYPE_TEMPO] and off_peak_hours_ranges is not None:
-            contract_type_key = 'hphc' if data['contract_type'] == CONTRACT_TYPE_HPHC else 'tempo'
+        elif contract_type in [CONTRACT_TYPE_HPHC, CONTRACT_TYPE_TEMPO] and off_peak_hours_ranges is not None:
+            contract_type_key = 'hphc' if contract_type == CONTRACT_TYPE_HPHC else 'tempo'
             tarif_key = contract_type_key+'_variable_hp_ttc'
             for range in off_peak_hours_ranges.split(','):
                 if not re.match(r'([0-1]?[0-9]|2[0-3]):[0-5][0-9]-([0-1]?[0-9]|2[0-3]):[0-5][0-9]', range):
@@ -282,7 +254,75 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
             if tarif_key in self.data:
                 self.data['tarif_actuel_ttc'] = self.data[tarif_key]
 
+        self.data['last_refresh_at'] = now
+
         self.logger.debug('EDF Tarif')
         self.logger.debug(self.data)
 
         return self.data
+
+    async def update_prices(self, today: date) -> None:
+        contract_type = self.data['contract_type']
+        contract_power = self.data['contract_power']
+
+        url = CONTRACT_TARIF_URL_MAPPING.get(contract_type)
+        if url is None:
+            raise ValueError(f"Unknown contract type: {contract_type}")
+
+        response = await get_remote_file_async(self.hass, url)
+        lines = response.decode('utf-8').splitlines()
+        reader = csv.DictReader(lines, delimiter=';')
+
+        # Reverse list of rows, so we read from the last line
+        for row in reversed(list(reader)):
+            if row['DATE_DEBUT'] == '':  # CSV can contain empty lines
+                continue
+
+            if row['P_SOUSCRITE'] != contract_power:
+                continue
+
+            #Prices are defined into an interval with a begin date and an optional end date
+            start_date = str_to_date(row['DATE_DEBUT'])
+            if today < start_date:
+                continue
+
+            end_date = str_to_date(row['DATE_FIN']) if row['DATE_FIN']  != '' else None
+            if end_date is not None and end_date < today:
+                continue
+
+            if contract_type == CONTRACT_TYPE_BASE:
+                self.data['base_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
+                self.data['base_variable_ttc'] = float(row['PART_VARIABLE_TTC'].replace(",", "." ))
+            elif contract_type == CONTRACT_TYPE_HPHC:
+                self.data['hphc_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
+                self.data['hphc_variable_hc_ttc'] = float(row['PART_VARIABLE_HC_TTC'].replace(",", "." ))
+                self.data['hphc_variable_hp_ttc'] = float(row['PART_VARIABLE_HP_TTC'].replace(",", "." ))
+            elif contract_type == CONTRACT_TYPE_TEMPO:
+                self.data['tempo_fixe_ttc'] = float(row['PART_FIXE_TTC'].replace(",", "." )) / 12
+                self.data['tempo_variable_hc_bleu_ttc'] = float(row['PART_VARIABLE_HCBleu_TTC'].replace(",", "." ))
+                self.data['tempo_variable_hp_bleu_ttc'] = float(row['PART_VARIABLE_HPBleu_TTC'].replace(",", "." ))
+                self.data['tempo_variable_hc_blanc_ttc'] = float(row['PART_VARIABLE_HCBlanc_TTC'].replace(",", "." ))
+                self.data['tempo_variable_hp_blanc_ttc'] = float(row['PART_VARIABLE_HPBlanc_TTC'].replace(",", "." ))
+                self.data['tempo_variable_hc_rouge_ttc'] = float(row['PART_VARIABLE_HCRouge_TTC'].replace(",", "." ))
+                self.data['tempo_variable_hp_rouge_ttc'] = float(row['PART_VARIABLE_HPRouge_TTC'].replace(",", "." ))
+            return
+
+        
+        self.logger.debug('No tarif found')
+
+    
+    async def update_tempo_stats(self) -> None:
+        response_bytes = await get_remote_file_async(self.hass, TEMPO_COLOR_STATS_API_URL)
+        response_json = json.loads(response_bytes.decode('utf-8'))
+
+        self.data['tempo_stats_jours_bleus_restants'] = response_json['joursBleusRestants']
+        self.data['tempo_stats_jours_bleus_consommes'] = response_json['joursBleusConsommes']
+        self.data['tempo_stats_jours_bleus_total'] = response_json['joursBleusRestants'] + response_json['joursBleusConsommes']
+
+        self.data['tempo_stats_jours_blancs_restants'] = response_json['joursBlancsRestants']
+        self.data['tempo_stats_jours_blancs_consommes'] = response_json['joursBlancsConsommes']
+        self.data['tempo_stats_jours_blancs_total'] = response_json['joursBlancsRestants'] + response_json['joursBlancsConsommes']
+
+        self.data['tempo_stats_jours_rouges_restants'] = response_json['joursRougesRestants']
+        self.data['tempo_stats_jours_rouges_consommes'] = response_json['joursRougesConsommes']
+        self.data['tempo_stats_jours_rouges_total'] = response_json['joursRougesRestants'] + response_json['joursRougesConsommes']
